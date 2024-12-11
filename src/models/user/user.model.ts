@@ -12,7 +12,7 @@ const userSchema = new mongoose.Schema(
         contactNo: {type: Number, required: false},
         email: {type: String, required: true},
         password: {type: String, required: true},
-        isDoctor: {type: Boolean, required: false},
+        isDoctor: {type: Boolean, required: true},
         doctorType: {type: String, required: false},
         gender: {type: String, required: false}
     },

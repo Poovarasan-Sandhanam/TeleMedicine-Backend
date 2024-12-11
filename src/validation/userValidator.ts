@@ -14,7 +14,7 @@ export const validateUserRegisterSchema = [
         .isLength({ min: 6 }).withMessage('Password must be at least 6 characters'),
 
     body('isDoctor')
-        .optional({ nullable: true, checkFalsy: true })
+        .notEmpty().withMessage('Doctor status is required')
         .isBoolean().withMessage('Doctor status must be a boolean'),
 
     body('doctorType')

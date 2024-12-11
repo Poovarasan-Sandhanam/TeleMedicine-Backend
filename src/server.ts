@@ -1,16 +1,20 @@
-import express, { Request, Response, RequestHandler, ErrorRequestHandler } from "express";
+import express, { Request, Response } from "express";
 import config from "./configurations/config";
 import routes from "./routes/index.route";
 import mongoose from "mongoose";
 import logging from "./utilities/logging";
-
+import { handleError } from "./utilities/errorHandler";
+import path from "path";
+// import './@types/express/index.d.ts'
 const app = express();
+
 const NAMESPACE = "Server";
 
 app.use(express.json());
+app.use("/uploads", express.static(path.join(__dirname, "uploads")));
 
-// Middleware to handle CORS
-app.use(((req, res, next) => {
+
+app.use((req, res, next) => {
   res.header("Access-Control-Allow-Origin", "*");
   res.header(
     "Access-Control-Allow-Headers",
@@ -21,16 +25,17 @@ app.use(((req, res, next) => {
     return res.status(200).json({});
   }
   next();
-}) as RequestHandler);
+});
 
-// Middleware for logging requests
-app.use(((req, res, next) => {
+app.use((req, res, next) => {
+  /** Log the req */
   logging.info(
     NAMESPACE,
     `METHOD: [${req.method}] - URL: [${req.url}] - IP: [${req.socket.remoteAddress}]`
   );
 
   res.on("finish", () => {
+    /** Log the res */
     logging.info(
       NAMESPACE,
       `METHOD: [${req.method}] - URL: [${req.url}] - STATUS: [${res.statusCode}] - IP: [${req.socket.remoteAddress}]`
@@ -38,40 +43,37 @@ app.use(((req, res, next) => {
   });
 
   next();
-}) as RequestHandler);
+});
 
-// Connect to MongoDB
 mongoose
   .connect(config.MONGO.url)
-  .then(() => logging.info(NAMESPACE, "Mongo Connected"))
-  .catch((error) => logging.error(NAMESPACE, error.message, error));
+  .then(async () => {
+    logging.info(NAMESPACE, "Mongo Connected");
+  })
+  .catch((error: any) => {
+    logging.error(NAMESPACE, error.message, error);
+  });
 
 mongoose.Promise = global.Promise;
-
-// Test route
 app.get("/", (req: Request, res: Response) => {
-  res.status(200).json({ message: "Welcome to Telemedicine!" });
+  res.status(200).json({
+    message: "Welcome to Telemedicine!",
+  });
 });
 
-// API routes
-app.use(config.API.prefix, routes);
-
-// Error handling middleware
-const handleError: ErrorRequestHandler = (err, req, res, next) => {
-  const statusCode = err.status || 500;
-  res.status(statusCode).json({
-    error: err.message || "An error occurred",
-  });
-};
-
+/* routes */
+let prefix = config.API.prefix;
+app.use(prefix, routes);
 app.use(handleError);
 
-// Catch-all for undefined routes
+
 app.all("*", (req: Request, res: Response) => {
-  res.status(404).json({ message: "Route Not Found!" });
+  res.status(404).json({
+    message: "Route Not Found!",
+  });
 });
 
-// Start server
+
 app.listen(config.SERVER.port, () => {
   console.info(
     `Server is listening at ${config.SERVER.hostName}:${config.SERVER.port}`

@@ -2,8 +2,6 @@ import 'dotenv/config';
 
 const env = process.env.NODE_ENV || 'development';
 
-
-
 const config = {
     env,
     DEFAULT_LIMIT: 10,

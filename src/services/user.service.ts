@@ -4,7 +4,7 @@ import userModel from "../models/user/user.model"
 
 const getUserDetails = async (query: any) => {
     try {
-        let result = await userModel.findOne(query)
+        let result = await userModel.findOne(query).exec()
         return result
     } catch (error: any) {
         throw new Error(error.message)
