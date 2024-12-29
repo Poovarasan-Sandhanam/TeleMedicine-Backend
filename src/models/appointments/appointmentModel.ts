@@ -12,7 +12,7 @@ const appointments = new mongoose.Schema(
             required: false,
         },
         checkupTiming: {
-            type: Date,
+            type: String,
             required: true,
         },
         doctor: {

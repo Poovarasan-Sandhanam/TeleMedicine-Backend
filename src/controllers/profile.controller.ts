@@ -5,6 +5,7 @@ import userService from "../services/user.service";
 import userProfileModel from "../models/user/userProfileModel";
 import { ObjectId } from "mongodb";
 
+
 const updateProfile = async (req: Request, res: Response) => {
     try {
         const {
@@ -90,7 +91,7 @@ const getProfile = async (req: Request, res: Response) => {
                     foreignField: '_id',
                     as: 'userDetails',
                     pipeline: [
-                        { $project: { _id: 0, __v: 0 } },
+                        { $project: { id: 0, _v: 0 } },
                     ],
                 },
             },
@@ -155,5 +156,3 @@ const getDoctorTypes = async (req: Request, res: Response) => {
 };
 
 export default { updateProfile, getProfile, getDoctorTypes };
-
-
