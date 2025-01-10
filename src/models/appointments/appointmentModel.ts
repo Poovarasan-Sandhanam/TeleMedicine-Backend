@@ -32,6 +32,10 @@ const appointments = new mongoose.Schema(
             enum: ['Pending', 'Accepted', 'Rejected', 'Completed'],
             default: 'Pending'
         },
+        date : {
+            type: Date,
+            required: true
+        }
     }, {timestamps: true});
 
 appointments.set("toJSON", {

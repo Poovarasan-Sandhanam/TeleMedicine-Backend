@@ -24,11 +24,11 @@ const userProfile = new mongoose.Schema(
             required: true,
         },
         weight: {
-            type: Number,
+            type: String,
             required: true,
         },
         height: {
-            type: Number,
+            type: String,
             required: true,
         },
         ongoingTreatment: {
