@@ -1,5 +1,4 @@
 import {Request, Response} from "express"
-
 import HttpStatusCode from "http-status-codes"
 import userService from "../services/user.service"
 import bcrypt from 'bcryptjs'

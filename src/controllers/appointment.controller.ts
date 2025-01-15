@@ -84,7 +84,7 @@ const getAllAppointments = async (req: Request, res: Response) => {
             {
                 $lookup: {
                     from: 'users',
-                    localField: 'doctor',
+                    localField: 'bookedBy',
                     foreignField: '_id',
                     as: 'userDetails'
                 }
