@@ -10,9 +10,17 @@ const app = express();
 
 const NAMESPACE = "Server";
 
-app.use(express.json());
+// app.use(express.json());
+app.use(express.json({
+  // We need the raw body to verify webhook signatures.
+  // Let's compute it only when hitting the Stripe webhook endpoint.
+  verify: function (req: any, res: Response, buf: Buffer) {
+    if (req.originalUrl.includes("/webhook")) {
+      req.rawBody = buf.toString();
+    }
+  }
+}));
 app.use("/uploads", express.static(path.join(__dirname, "uploads")));
-
 
 app.use((req, res, next) => {
   res.header("Access-Control-Allow-Origin", "*");
