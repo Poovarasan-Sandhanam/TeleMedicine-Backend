@@ -47,7 +47,60 @@ const createPaymentIntent = async (req: Request, res: Response) => {
 const getMyBookings = async (req: Request, res: Response) => {
     try {
         const userId = (req as any).user._id.toString();
-        const bookingDetails =await appointmentModel.find({bookedBy: userId});
+        const bookingDetails = await appointmentModel.aggregate([
+            {
+                $match: {
+                    bookedBy: new ObjectId(userId),
+                },
+            },
+            {
+                $lookup: {
+                    from: 'users',
+                    localField: 'doctor',
+                    foreignField: '_id',
+                    as: 'userDetails'
+                }
+            },
+            {
+                $unwind: {
+                    path: '$userDetails',
+                    preserveNullAndEmptyArrays: true
+                }
+            }
+        ]);
+        return sendSuccess(res, {bookingDetails}, 'Booking Details fetched successfully', HttpStatusCode.OK);
+    } catch (error: any) {
+        return res.status(HttpStatusCode.BAD_REQUEST).send({
+            status: false,
+            message: error.message,
+        });
+    }
+};
+
+const getAllBookingUsers = async (req: Request, res: Response) => {
+    try {
+        const userId = (req as any).user._id.toString();
+        const bookingDetails = await appointmentModel.aggregate([
+            {
+                $match: {
+                    doctor: new ObjectId(userId),
+                },
+            },
+            {
+                $lookup: {
+                    from: 'users',
+                    localField: 'bookedBy',
+                    foreignField: '_id',
+                    as: 'userDetails'
+                }
+            },
+            {
+                $unwind: {
+                    path: '$userDetails',
+                    preserveNullAndEmptyArrays: true
+                }
+            }
+        ]);
         return sendSuccess(res, {bookingDetails}, 'Booking Details fetched successfully', HttpStatusCode.OK);
     } catch (error: any) {
         return res.status(HttpStatusCode.BAD_REQUEST).send({
@@ -149,4 +202,4 @@ const getDetailsFromWebhook = async (req: any, res: Response) => {
     }
 }
 
-export default {createPaymentIntent, getDetailsFromWebhook, getMyBookings};
+export default {createPaymentIntent, getDetailsFromWebhook, getMyBookings, getAllBookingUsers};

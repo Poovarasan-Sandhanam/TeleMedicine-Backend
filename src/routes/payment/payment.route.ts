@@ -7,6 +7,7 @@ const router = Router();
 
 router.post('/book-now', auth, paymentController.createPaymentIntent);
 router.get('/get-bookings', auth, paymentController.getMyBookings)
+router.get('/get-bookings-users', auth, paymentController.getAllBookingUsers)
 router.post('/webhook', paymentController.getDetailsFromWebhook);
 
 export default router;
