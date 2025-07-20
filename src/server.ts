@@ -5,7 +5,7 @@ import mongoose from "mongoose";
 import logging from "./utilities/logging";
 import { handleError } from "./utilities/errorHandler";
 import path from "path";
-// import './@types/express/index.d.ts'
+
 const app = express();
 
 const NAMESPACE = "Server";
@@ -35,6 +35,7 @@ app.use((req, res, next) => {
   next();
 });
 
+
 app.use((req, res, next) => {
   /** Log the req */
   logging.info(
@@ -53,6 +54,8 @@ app.use((req, res, next) => {
   next();
 });
 
+const prefix = config.API.prefix;
+
 mongoose
   .connect(config.MONGO.url)
   .then(async () => {
@@ -70,7 +73,6 @@ app.get("/", (req: Request, res: Response) => {
 });
 
 /* routes */
-let prefix = config.API.prefix;
 app.use(prefix, routes);
 app.use(handleError);
 
