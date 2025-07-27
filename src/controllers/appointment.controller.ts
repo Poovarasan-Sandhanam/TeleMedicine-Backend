@@ -1,5 +1,4 @@
 import {Request, Response} from "express"
-
 import HttpStatusCode from "http-status-codes"
 import {sendSuccess} from "../utilities/responseHandler";
 import appointmentModel from "../models/appointments/appointmentModel";
