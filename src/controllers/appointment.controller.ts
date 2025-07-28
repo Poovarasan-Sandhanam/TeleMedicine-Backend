@@ -3,11 +3,12 @@ import HttpStatusCode from "http-status-codes"
 import {sendSuccess} from "../utilities/responseHandler";
 import appointmentModel from "../models/appointments/appointmentModel";
 import userModel from "../models/user/user.model";
+import doctorProfileModel from "../models/user/doctorProfile.model";
+import patientProfileModel from "../models/user/patientProfile.model";
 import CustomError from "../utilities/customError";
-import userProfileModel from "../models/user/userProfileModel";
 import moment from "moment";
 import {ObjectId} from "mongodb";
-
+import { UserRole, DoctorSpecialization } from "../interfaces/user.interface";
 
 const bookAppointment = async (req: Request, res: Response) => {
     try {
@@ -16,18 +17,30 @@ const bookAppointment = async (req: Request, res: Response) => {
 
         const userDetails = await userModel.findOne({_id: userId});
 
-        if (userDetails?.isDoctor) {
-            throw new CustomError('Only users are allowed to book the appointment', HttpStatusCode.UNPROCESSABLE_ENTITY)
+        // Check if user is a patient (using both new and legacy systems)
+        const isUserPatient = userDetails?.role === UserRole.PATIENT || userDetails?.isDoctor === false;
+        
+        if (!isUserPatient) {
+            throw new CustomError('Only patients are allowed to book appointments', HttpStatusCode.UNPROCESSABLE_ENTITY)
         }
+
+        // Verify the doctor exists and is actually a doctor
+        const doctorDetails = await userModel.findOne({_id: doctor});
+        const isDoctorValid = doctorDetails?.role === UserRole.DOCTOR || doctorDetails?.isDoctor === true;
+        
+        if (!isDoctorValid) {
+            throw new CustomError('Invalid doctor selected', HttpStatusCode.BAD_REQUEST);
+        }
+
         const appointmentData = await appointmentModel.findOne({doctor, checkupTiming, date});
         if (appointmentData) {
             throw new CustomError('This appointment is already booked', HttpStatusCode.BAD_REQUEST);
         }
+        
         const appointmentDetails = await appointmentModel.create({
             healthIssues, checkupTiming, doctor, notes, bookedBy: userId, date
         })
 
-        // Return success response with updated details
         return sendSuccess(res, appointmentDetails, 'Appointment booked successfully', HttpStatusCode.CREATED);
 
     } catch (error: any) {
@@ -46,7 +59,6 @@ const bookAppointmentStatus = async (req: Request, res: Response) => {
             bookedBy: userId
         }, {$set: {status}})
 
-        // Return success response with updated details
         return sendSuccess(res, appointmentDetails, 'Appointment booked status changed successfully', HttpStatusCode.CREATED);
 
     } catch (error: any) {
@@ -61,6 +73,15 @@ const getAllAppointments = async (req: Request, res: Response) => {
     try {
         const date: any = req.query.date;
         const userId = (req as any).user._id
+        
+        // Verify user is a doctor
+        const userDetails = await userModel.findOne({_id: userId});
+        const isUserDoctor = userDetails?.role === UserRole.DOCTOR || userDetails?.isDoctor === true;
+        
+        if (!isUserDoctor) {
+            throw new CustomError('Only doctors can view appointments', HttpStatusCode.FORBIDDEN);
+        }
+
         const pipeline = [
             {
                 $addFields: {
@@ -74,9 +95,7 @@ const getAllAppointments = async (req: Request, res: Response) => {
             },
             {
                 $match: {
-                    doctor: new ObjectId(
-                        userId
-                    ),
+                    doctor: new ObjectId(userId),
                     formattedDate: date
                 }
             },
@@ -251,7 +270,7 @@ const getAllDoctors = async (req: Request, res: Response) => {
                 });
             }
 
-            const doctorDetails = await userModel.find({isDoctor: true, doctorType: specialization});
+            const doctorDetails = await userModel.find({role: UserRole.DOCTOR, specialization: specialization});
             if (!doctorDetails.length) {
                 return res.status(HttpStatusCode.NOT_FOUND).send({
                     status: false,
@@ -265,7 +284,7 @@ const getAllDoctors = async (req: Request, res: Response) => {
         // Find by doctor ID
         if (id) {
 
-            const doctorDetails = await userProfileModel.findOne({userId: id}, {'consultationTiming': 1});
+            const doctorDetails = await doctorProfileModel.findOne({userId: id}, {'consultationTiming': 1});
             if (!doctorDetails) {
 
                 return res.status(HttpStatusCode.NOT_FOUND).send({
@@ -282,10 +301,10 @@ const getAllDoctors = async (req: Request, res: Response) => {
 
         // Fetch all doctors
         const doctors = await userModel.aggregate([
-            {$match: {isDoctor: true}},
+            {$match: {role: UserRole.DOCTOR}},
             {
                 $lookup: {
-                    from: 'userprofiles',
+                    from: 'doctorprofiles',
                     localField: '_id',
                     foreignField: 'userId',
                     as: 'profileDetails'
