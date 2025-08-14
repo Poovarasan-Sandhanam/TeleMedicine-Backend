@@ -5,7 +5,8 @@ export interface IPatientProfile extends Document {
   name: string;
   age: number;
   bloodGroup: string;
-  weight: number;
+  gender: string;
+  weight: string;
   height: number;
   ongoingTreatment?: string;
   healthIssues?: string[];
@@ -19,8 +20,9 @@ const patientProfileSchema: Schema = new Schema({
   userId: { type: Schema.Types.ObjectId, ref: "User", required: true, unique: true },
   name: { type: String, required: true },
   age: { type: Number, required: true },
+  gender:{ type: String, required: true },
   bloodGroup: { type: String, required: true },
-  weight: { type: Number, required: true },
+  weight: { type: String, required: true },
   height: { type: Number, required: true },
   ongoingTreatment: { type: String },
   healthIssues: { type: [String], default: [] },

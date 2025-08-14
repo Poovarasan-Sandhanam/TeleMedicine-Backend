@@ -13,26 +13,27 @@ import { IPatientProfile } from "../interfaces/patientProfile.interface";
 const updateProfile = async (req: Request, res: Response) => {
   try {
     const userId = (req as any).user._id;
+
     const userData = await userService.getUserDetails({ _id: userId });
+    if (!userData) return sendError(res, "User not found", HttpStatusCode.NOT_FOUND);
 
-    if (!userData) return sendError(res, 'User not found', HttpStatusCode.NOT_FOUND);
+    const isDoctor = userData.role === UserRole.DOCTOR || userData.isDoctor;
+    const imageUrl = req.file ? await uploadToS3(req.file) : undefined;
 
-    const isUserDoctor = userData.role === UserRole.DOCTOR || userData.isDoctor;
-    const imageUrl = req.file ? await uploadToS3(req.file) : null;
-
-    if (isUserDoctor) {
+    if (isDoctor) {
       const {
         name, age, contactNumber, address, specialization,
         experience, consultationTiming, licenseNumber,
-        education, certifications, languages
+        education, certifications, languages, gender
       } = req.body;
 
-      for (const field of [name, age, contactNumber, address, specialization, experience, consultationTiming]) {
-        if (!field) return sendError(res, `Field ${field} is required for doctors`, HttpStatusCode.BAD_REQUEST);
+      // Validate required fields
+      for (const [key, value] of Object.entries({ name, age, contactNumber, address, specialization, gender, experience, consultationTiming })) {
+        if (!value) return sendError(res, `Field ${key} is required for doctors`, HttpStatusCode.BAD_REQUEST);
       }
 
       if (!Object.values(DoctorSpecialization).includes(specialization)) {
-        return sendError(res, 'Invalid specialization', HttpStatusCode.BAD_REQUEST);
+        return sendError(res, "Invalid specialization", HttpStatusCode.BAD_REQUEST);
       }
 
       const updatedProfile = await doctorProfileModel.updateOne(
@@ -45,48 +46,50 @@ const updateProfile = async (req: Request, res: Response) => {
           specialization,
           experience,
           consultationTiming,
+          gender,
           licenseNumber,
           education,
-          certifications: certifications ? certifications.split(',') : [],
-          languages: languages ? languages.split(',') : [],
+          certifications: certifications ? certifications.split(",") : [],
+          languages: languages ? languages.split(",") : [],
           ...(imageUrl && { profileImage: imageUrl }),
         },
         { upsert: true }
       );
 
-      return sendSuccess(res, updatedProfile, 'Doctor profile updated successfully');
+      return sendSuccess(res, updatedProfile, "Doctor profile updated successfully");
+    } else {
+      // Patient profile
+      const {
+        name, age, bloodGroup, weight, height,
+        ongoingTreatment, healthIssues, contactNumber,
+        address, allergies, gender
+      } = req.body;
+
+      for (const [key, value] of Object.entries({ name, age, bloodGroup, gender, weight, height, contactNumber, address })) {
+        if (!value) return sendError(res, `Field ${key} is required for patients`, HttpStatusCode.BAD_REQUEST);
+      }
+
+      const updatedProfile = await patientProfileModel.updateOne(
+        { userId },
+        {
+          name,
+          age,
+          bloodGroup,
+          weight,
+          height,
+          gender,
+          ongoingTreatment,
+          healthIssues: healthIssues ? healthIssues.split(",") : [],
+          contactNumber,
+          address,
+          allergies: allergies ? allergies.split(",") : [],
+          ...(imageUrl && { profileImage: imageUrl }),
+        },
+        { upsert: true }
+      );
+
+      return sendSuccess(res, updatedProfile, "Patient profile updated successfully");
     }
-
-    // Patient
-    const {
-      name, age, bloodGroup, weight, height,
-      ongoingTreatment, healthIssues, contactNumber,
-      address, allergies
-    } = req.body;
-
-    for (const field of [name, age, bloodGroup, weight, height, contactNumber, address]) {
-      if (!field) return sendError(res, `Field ${field} is required for patients`, HttpStatusCode.BAD_REQUEST);
-    }
-
-    const updatedProfile = await patientProfileModel.updateOne(
-      { userId },
-      {
-        name,
-        age,
-        bloodGroup,
-        weight,
-        height,
-        ongoingTreatment,
-        healthIssues: healthIssues ? healthIssues.split(',') : [],
-        contactNumber,
-        address,
-        allergies: allergies ? allergies.split(',') : [],
-        ...(imageUrl && { profileImage: imageUrl }),
-      },
-      { upsert: true }
-    );
-
-    return sendSuccess(res, updatedProfile, 'Patient profile updated successfully');
   } catch (error: any) {
     return sendError(res, error.message, HttpStatusCode.BAD_REQUEST);
   }
@@ -96,14 +99,12 @@ const getProfile = async (req: Request, res: Response) => {
   try {
     const userId = (req as any).user._id;
     const userData = await userService.getUserDetails({ _id: userId });
+    if (!userData) return sendError(res, "User not found", HttpStatusCode.NOT_FOUND);
 
-    if (!userData) return sendError(res, 'User not found', HttpStatusCode.NOT_FOUND);
-
-    const isUserDoctor = userData.role === UserRole.DOCTOR || userData.isDoctor;
-
+    const isDoctor = userData.role === UserRole.DOCTOR || userData.isDoctor;
     let profileData: any;
 
-    if (isUserDoctor) {
+    if (isDoctor) {
       const profile = await doctorProfileModel.findOne({ userId } as FilterQuery<IDoctorProfile>);
       profileData = profile ? { ...userData.toObject(), ...profile.toObject() } : userData.toObject();
     } else {
@@ -111,18 +112,39 @@ const getProfile = async (req: Request, res: Response) => {
       profileData = profile ? { ...userData.toObject(), ...profile.toObject() } : userData.toObject();
     }
 
-    return sendSuccess(res, profileData, 'Profile fetched successfully');
+    return sendSuccess(res, profileData, "Profile fetched successfully");
   } catch (error: any) {
     return sendError(res, error.message, HttpStatusCode.BAD_REQUEST);
   }
 };
 
-const getDoctorTypes = async (_req: Request, res: Response) => {
-  try {
-    return sendSuccess(res, Object.values(DoctorSpecialization), 'Doctor types fetched successfully');
-  } catch (error: any) {
-    return sendError(res, error.message, HttpStatusCode.BAD_REQUEST);
-  }
-};
 
+const getDoctorTypes = async (req: Request, res: Response) => {
+    try {
+        const doctorTypes = [
+            "General Practitioner (GP)",
+            "Cardiologist",
+            "Pediatrician",
+            "Orthopedic Surgeon",
+            "Gynecologist",
+            "Obstetrician (OB)",
+            "Dermatologist",
+            "Endocrinologist",
+            "Neurologist",
+            "Psychiatrist",
+            "Gastroenterologist",
+            "Pulmonologist",
+            "Oncologist",
+            "Ophthalmologist",
+            "Urologist",
+        ];
+        return sendSuccess(res, doctorTypes, 'Doctor Types fetched successfully', HttpStatusCode.OK);
+
+    } catch (error: any) {
+        return res.status(HttpStatusCode.BAD_REQUEST).send({
+            status: false,
+            message: error.message,
+        });
+    }
+}
 export default { updateProfile, getProfile, getDoctorTypes };
