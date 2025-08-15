@@ -119,32 +119,5 @@ const getProfile = async (req: Request, res: Response) => {
 };
 
 
-const getDoctorTypes = async (req: Request, res: Response) => {
-    try {
-        const doctorTypes = [
-            "General Practitioner (GP)",
-            "Cardiologist",
-            "Pediatrician",
-            "Orthopedic Surgeon",
-            "Gynecologist",
-            "Obstetrician (OB)",
-            "Dermatologist",
-            "Endocrinologist",
-            "Neurologist",
-            "Psychiatrist",
-            "Gastroenterologist",
-            "Pulmonologist",
-            "Oncologist",
-            "Ophthalmologist",
-            "Urologist",
-        ];
-        return sendSuccess(res, doctorTypes, 'Doctor Types fetched successfully', HttpStatusCode.OK);
 
-    } catch (error: any) {
-        return res.status(HttpStatusCode.BAD_REQUEST).send({
-            status: false,
-            message: error.message,
-        });
-    }
-}
-export default { updateProfile, getProfile, getDoctorTypes };
+export default { updateProfile, getProfile };

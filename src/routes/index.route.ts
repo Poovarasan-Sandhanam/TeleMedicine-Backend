@@ -7,6 +7,7 @@ import appointmentRoutes from "./appointment/appointment.route"
 import paymentRoutes from "./payment/payment.route"
 import prescriptionRoutes from "./prescription/prescription.route"
 import aiRoutes from './ai/ai.route';
+import doctorRoutes from './doctor/doctor.route';
 
 const router = Router();
 
@@ -16,5 +17,7 @@ router.use("/appointment", appointmentRoutes);
 router.use("/payment", paymentRoutes);
 router.use("/prescription", prescriptionRoutes);
 router.use('/ai', aiRoutes);
+router.use("/doctor", doctorRoutes);
+
 
 export default router;

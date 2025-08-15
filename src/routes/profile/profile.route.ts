@@ -11,6 +11,5 @@ router.put(
     profileController.updateProfile
 );
 router.get('/get-profile', auth, profileController.getProfile);
-router.get('/get-doctor-types', auth, profileController.getDoctorTypes);
 
 export default router;
