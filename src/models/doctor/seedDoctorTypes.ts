@@ -1,8 +1,9 @@
-// seedDoctorTypes.ts
-import mongoose from 'mongoose';
-import DoctorType from './doctorType.model';
-import config from '../../configurations/config';
+import { Request, Response } from "express";
+import HttpStatusCode from "http-status-codes";
+import { sendError, sendSuccess } from "../../utilities/responseHandler";
+import DoctorType from "../../models/doctor/doctorType.model";
 
+// Predefined doctor categories
 const DOCTOR_CATEGORIES = [
   { id: 'gp', title: 'General Practitioner (GP)', image: 'https://telemedicine-storage-backend.s3.eu-west-2.amazonaws.com/specialization/special/general.png' },
   { id: 'cardiologist', title: 'Cardiologist', image: 'https://telemedicine-storage-backend.s3.eu-west-2.amazonaws.com/specialization/special/Cardiologist.png' },
@@ -21,15 +22,39 @@ const DOCTOR_CATEGORIES = [
   { id: 'urologist', title: 'Urologist', image: 'https://telemedicine-storage-backend.s3.eu-west-2.amazonaws.com/specialization/special/Urologist.jpg' },
 ];
 
-(async () => {
+// GET all doctor types
+export const getDoctorTypes = async (req: Request, res: Response) => {
   try {
-     await mongoose.connect(config.MONGO.url);
-    await DoctorType.deleteMany({});
-    await DoctorType.insertMany(DOCTOR_CATEGORIES);
-    console.log('Doctor types seeded successfully');
-    process.exit();
-  } catch (err) {
-    console.error(err);
-    process.exit(1);
+    let doctorTypes = await DoctorType.find({});
+
+    // Auto-seed if empty
+    if (doctorTypes.length === 0) {
+      await DoctorType.insertMany(DOCTOR_CATEGORIES);
+      doctorTypes = await DoctorType.find({});
+    }
+
+    return sendSuccess(res, doctorTypes, "Doctor Types fetched successfully", HttpStatusCode.OK);
+  } catch (error: any) {
+    return sendError(res, error.message, HttpStatusCode.BAD_REQUEST);
   }
-})();
+};
+
+// Optional: Add new doctor type (admin-only)
+export const addDoctorType = async (req: Request, res: Response) => {
+  try {
+    const { id, title, image } = req.body;
+    if (!id || !title || !image) {
+      return sendError(res, "id, title, and image are required", HttpStatusCode.BAD_REQUEST);
+    }
+
+    const exists = await DoctorType.findOne({ id });
+    if (exists) {
+      return sendError(res, "Doctor type with this ID already exists", HttpStatusCode.CONFLICT);
+    }
+
+    const newType = await DoctorType.create({ id, title, image });
+    return sendSuccess(res, newType, "Doctor type added successfully", HttpStatusCode.CREATED);
+  } catch (error: any) {
+    return sendError(res, error.message, HttpStatusCode.BAD_REQUEST);
+  }
+};
