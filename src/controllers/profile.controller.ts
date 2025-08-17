@@ -9,7 +9,11 @@ import { UserRole, DoctorSpecialization } from "../interfaces/user.interface";
 import { FilterQuery } from "mongoose";
 import { IDoctorProfile } from "../interfaces/doctorProfile.interface";
 import { IPatientProfile } from "../interfaces/patientProfile.interface";
+import UserModel from "../models/user/user.model"; // make sure path is correct
 
+/**
+ * Update profile for doctor or patient
+ */
 const updateProfile = async (req: Request, res: Response) => {
   try {
     const userId = (req as any).user._id;
@@ -28,7 +32,9 @@ const updateProfile = async (req: Request, res: Response) => {
       } = req.body;
 
       // Validate required fields
-      for (const [key, value] of Object.entries({ name, age, contactNumber, address, specialization, gender, experience, consultationTiming })) {
+      for (const [key, value] of Object.entries({
+        name, age, contactNumber, address, specialization, gender, experience, consultationTiming
+      })) {
         if (!value) return sendError(res, `Field ${key} is required for doctors`, HttpStatusCode.BAD_REQUEST);
       }
 
@@ -65,7 +71,9 @@ const updateProfile = async (req: Request, res: Response) => {
         address, allergies, gender
       } = req.body;
 
-      for (const [key, value] of Object.entries({ name, age, bloodGroup, gender, weight, height, contactNumber, address })) {
+      for (const [key, value] of Object.entries({
+        name, age, bloodGroup, gender, weight, height, contactNumber, address
+      })) {
         if (!value) return sendError(res, `Field ${key} is required for patients`, HttpStatusCode.BAD_REQUEST);
       }
 
@@ -95,6 +103,9 @@ const updateProfile = async (req: Request, res: Response) => {
   }
 };
 
+/**
+ * Get profile of logged-in user
+ */
 const getProfile = async (req: Request, res: Response) => {
   try {
     const userId = (req as any).user._id;
@@ -118,6 +129,55 @@ const getProfile = async (req: Request, res: Response) => {
   }
 };
 
+/**
+ * Get all doctors who have completed their profiles
+ */
+const getCompletedDoctorProfiles = async (req: Request, res: Response) => {
+  try {
+    // Define required fields for a "completed" doctor profile
+    const requiredFields = [
+      "name",
+      "age",
+      "contactNumber",
+      "address",
+      "specialization",
+      "experience",
+      "consultationTiming",
+      "gender",
+      "licenseNumber"
+    ];
 
+    // Query doctors with all required fields filled
+    const doctors = await doctorProfileModel.find({
+      $and: requiredFields.map(field => ({
+        [field]: { $exists: true, $nin: [null, ""] }
+      }))
+    });
 
-export default { updateProfile, getProfile };
+    if (!doctors.length) {
+      return sendError(res, "No completed doctor profiles found", HttpStatusCode.NOT_FOUND);
+    }
+
+    // Ensure they are valid doctor users
+    const doctorUserIds = doctors.map(d => d.userId);
+    const users = await UserModel.find({
+      _id: { $in: doctorUserIds },
+      role: UserRole.DOCTOR
+    });
+
+    // Merge user + profile data
+    const result = doctors.map(doc => {
+      const user = users.find((u: any) => u._id.toString() === doc.userId.toString());
+      return {
+        ...user?.toObject(),
+        ...doc.toObject()
+      };
+    });
+
+    return sendSuccess(res, result, "Completed doctor profiles fetched successfully");
+  } catch (error: any) {
+    return sendError(res, error.message, HttpStatusCode.BAD_REQUEST);
+  }
+};
+
+export default { updateProfile, getProfile, getCompletedDoctorProfiles };

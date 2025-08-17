@@ -11,5 +11,6 @@ router.put(
     profileController.updateProfile
 );
 router.get('/get-profile', auth, profileController.getProfile);
+router.get('/get-completed-doctor-profiles', auth, profileController.getCompletedDoctorProfiles);
 
 export default router;
