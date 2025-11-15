@@ -1,5 +1,5 @@
 import { Schema, model } from 'mongoose'
-import {IBooking} from "../../interfaces/booking.interface";
+import { IBooking } from "../../interfaces/booking.interface";
 
 const userBookingSchema = new Schema({
     patientId: {
@@ -33,11 +33,11 @@ const userBookingSchema = new Schema({
     error: {
         type: String
     },
-    isBooked : {
+    isBooked: {
         type: Boolean,
         default: false
     },
-    isFree : {
+    isFree: {
         type: Boolean,
         default: false
     }
@@ -47,8 +47,9 @@ userBookingSchema.set("toJSON", {
     virtuals: true,
     versionKey: false,
     transform: (_doc, ret) => {
-        delete ret._id
-        delete ret.__v
+
+        delete (ret as any)._id;
+        delete (ret as any).__v;
     }
 })
 

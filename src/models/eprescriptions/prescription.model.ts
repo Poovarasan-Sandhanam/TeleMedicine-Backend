@@ -1,5 +1,5 @@
 import { Schema, model } from 'mongoose'
-import {IPrescriptions} from "../../interfaces/prescriptions.interface";
+import { IPrescriptions } from "../../interfaces/prescriptions.interface";
 
 const prescriptionSchema = new Schema({
     patientId: {
@@ -39,8 +39,9 @@ prescriptionSchema.set("toJSON", {
     virtuals: true,
     versionKey: false,
     transform: (_doc, ret) => {
-        delete ret._id
-        delete ret.__v
+
+        delete (ret as any)._id;
+        delete (ret as any).__v;
     }
 })
 

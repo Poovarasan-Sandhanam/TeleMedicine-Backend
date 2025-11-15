@@ -52,12 +52,14 @@ userSchema.index({ role: 1 });
 userSchema.index({ isDoctor: 1 });
 
 userSchema.set("toJSON", {
-    virtuals: true,
-    versionKey: false,
-    transform: (_doc, ret) => {
-        delete ret._id
-        delete ret.__v
-    }
-})
+  virtuals: true,
+  versionKey: false,
+  transform: (_doc, ret) => {
+    delete (ret as any)._id;
+    delete (ret as any).__v;
+  },
+});
+
+
 
 export default mongoose.model<UserDocument>("User", userSchema)
