@@ -16,7 +16,11 @@ export interface IDoctorProfile extends Document {
   certifications?: string[];
   languages?: string[];
   profileImage?: string;
+  consultationFee?: number;
 }
+
+/** Charged when a doctor has not set their own fee. Minor units (cents). */
+export const DEFAULT_CONSULTATION_FEE = 2500;
 
 const doctorProfileSchema: Schema = new Schema({
   userId: { type: Schema.Types.ObjectId, ref: "User", required: true, unique: true },
@@ -33,6 +37,8 @@ const doctorProfileSchema: Schema = new Schema({
   certifications: { type: [String], default: [] },
   languages: { type: [String], default: [] },
   profileImage: { type: String },
+  // Stored in minor units (cents) to avoid float rounding on money.
+  consultationFee: { type: Number, min: 0 },
 }, { timestamps: true });
 
 export default mongoose.model<IDoctorProfile>("DoctorProfile", doctorProfileSchema);
