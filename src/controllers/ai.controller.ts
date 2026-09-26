@@ -2,7 +2,23 @@
    import { Request, Response } from 'express';
    import OpenAI from 'openai';
 
-   const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+   /**
+    * Built on first use rather than at import time. Constructing the client eagerly
+    * threw when OPENAI_API_KEY was unset, which took down the whole server on boot
+    * instead of just degrading this one endpoint.
+    */
+   let openai: OpenAI | null = null;
+
+   const getOpenAIClient = (): OpenAI => {
+     if (!openai) {
+       const apiKey = process.env.OPENAI_API_KEY;
+       if (!apiKey) {
+         throw new Error('AI symptom checking is not configured on this server');
+       }
+       openai = new OpenAI({ apiKey });
+     }
+     return openai;
+   };
 
    export const checkSymptoms = async (req: Request, res: Response) => {
      const { symptoms } = req.body;
@@ -12,8 +28,16 @@
 
      const prompt = `A patient reports the following symptoms: ${symptoms}. What are the possible health issues, and which type of doctor should they consult? Respond in JSON with keys 'possible_conditions' (array of strings) and 'recommended_doctor' (string).`;
 
+     let client: OpenAI;
      try {
-       const completion = await openai.chat.completions.create({
+       client = getOpenAIClient();
+     } catch (error) {
+       const errMsg = error instanceof Error ? error.message : String(error);
+       return res.status(503).json({ error: errMsg });
+     }
+
+     try {
+       const completion = await client.chat.completions.create({
          model: 'gpt-4',
          messages: [{ role: 'user', content: prompt }],
          temperature: 0.2,
