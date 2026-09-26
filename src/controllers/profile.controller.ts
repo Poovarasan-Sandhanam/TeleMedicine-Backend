@@ -9,7 +9,8 @@ import { UserRole, DoctorSpecialization } from "../interfaces/user.interface";
 import { FilterQuery } from "mongoose";
 import { IDoctorProfile } from "../interfaces/doctorProfile.interface";
 import { IPatientProfile } from "../interfaces/patientProfile.interface";
-import UserModel from "../models/user/user.model"; // make sure path is correct
+import UserModel from "../models/user/user.model";
+import { resolveSpecialization } from "./doctor.controller";
 
 /**
  * Update profile for doctor or patient
@@ -26,10 +27,12 @@ const updateProfile = async (req: Request, res: Response) => {
 
     if (isDoctor) {
       const {
-        name, age, contactNumber, address, specialization,
+        name, age, contactNumber, address,
         experience, consultationTiming, licenseNumber,
         education, certifications, languages, gender
       } = req.body;
+      // The app has sent this as `specialized`, holding a tile id; accept both.
+      const specialization = resolveSpecialization(req.body.specialization ?? req.body.specialized);
 
       // Validate required fields
       for (const [key, value] of Object.entries({
@@ -38,7 +41,7 @@ const updateProfile = async (req: Request, res: Response) => {
         if (!value) return sendError(res, `Field ${key} is required for doctors`, HttpStatusCode.BAD_REQUEST);
       }
 
-      if (!Object.values(DoctorSpecialization).includes(specialization)) {
+      if (!specialization) {
         return sendError(res, "Invalid specialization", HttpStatusCode.BAD_REQUEST);
       }
 
