@@ -113,14 +113,15 @@ const getProfile = async (req: Request, res: Response) => {
     if (!userData) return sendError(res, "User not found", HttpStatusCode.NOT_FOUND);
 
     const isDoctor = userData.role === UserRole.DOCTOR || userData.isDoctor;
+    const { password, ...safeUser } = userData.toObject();
     let profileData: any;
 
     if (isDoctor) {
       const profile = await doctorProfileModel.findOne({ userId } as FilterQuery<IDoctorProfile>);
-      profileData = profile ? { ...userData.toObject(), ...profile.toObject() } : userData.toObject();
+      profileData = profile ? { ...safeUser, ...profile.toObject() } : safeUser;
     } else {
       const profile = await patientProfileModel.findOne({ userId } as FilterQuery<IPatientProfile>);
-      profileData = profile ? { ...userData.toObject(), ...profile.toObject() } : userData.toObject();
+      profileData = profile ? { ...safeUser, ...profile.toObject() } : safeUser;
     }
 
     return sendSuccess(res, profileData, "Profile fetched successfully");
@@ -163,7 +164,7 @@ const getCompletedDoctorProfiles = async (req: Request, res: Response) => {
     const users = await UserModel.find({
       _id: { $in: doctorUserIds },
       role: UserRole.DOCTOR
-    });
+    }).select('-password');
 
     // Merge user + profile data
     const result = doctors.map(doc => {
