@@ -10,9 +10,18 @@ import moment from "moment";
 import {ObjectId} from "mongodb";
 import { UserRole, DoctorSpecialization } from "../interfaces/user.interface";
 import { AppointmentStatus, BLOCKING_STATUSES } from "../interfaces/appointments.interface";
+import { withParticipant } from "../utilities/participantLookup";
+import userService from "../services/user.service";
 
 /** How long a slot stays reserved while the patient completes payment. */
 const HOLD_MINUTES = 15;
+
+/**
+ * Whether a booking must be paid for before it is confirmed. Off until in-app
+ * payment ships: with it on and no way to pay, every booking would sit in `held`
+ * and release its slot after HOLD_MINUTES. Set PAYMENT_REQUIRED=true to enable.
+ */
+const isPaymentRequired = () => process.env.PAYMENT_REQUIRED === 'true';
 
 /**
  * Matches appointments that currently occupy a slot: anything confirmed or completed,
@@ -64,13 +73,17 @@ const bookAppointment = async (req: Request, res: Response) => {
             throw new CustomError('This appointment is already booked', HttpStatusCode.BAD_REQUEST);
         }
 
+        const paymentRequired = isPaymentRequired();
         const appointmentDetails = await appointmentModel.create({
             healthIssue, checkupTiming, doctor, notes, bookedBy: userId, date,
-            status: AppointmentStatus.HELD,
-            expiresAt: moment().add(HOLD_MINUTES, 'minutes').toDate()
+            status: paymentRequired ? AppointmentStatus.HELD : AppointmentStatus.CONFIRMED,
+            expiresAt: paymentRequired ? moment().add(HOLD_MINUTES, 'minutes').toDate() : undefined
         })
 
-        return sendSuccess(res, appointmentDetails, `Slot held for ${HOLD_MINUTES} minutes - complete payment to confirm`, HttpStatusCode.CREATED);
+        const message = paymentRequired
+            ? `Slot held for ${HOLD_MINUTES} minutes - complete payment to confirm`
+            : 'Appointment booked successfully';
+        return sendSuccess(res, appointmentDetails, message, HttpStatusCode.CREATED);
 
     } catch (error: any) {
         return res.status(HttpStatusCode.BAD_REQUEST).send({
@@ -142,11 +155,13 @@ const getAllAppointments = async (req: Request, res: Response) => {
 
         const pipeline = [
             {
+                // Match on the day the appointment happens. This used `createdAt`,
+                // so a doctor viewing a day saw bookings *made* that day instead.
                 $addFields: {
                     formattedDate: {
                         $dateToString: {
                             format: '%d-%m-%Y',
-                            date: '$createdAt'
+                            date: '$date'
                         }
                     }
                 }
@@ -154,23 +169,12 @@ const getAllAppointments = async (req: Request, res: Response) => {
             {
                 $match: {
                     doctor: new ObjectId(userId),
-                    formattedDate: date
+                    formattedDate: date,
+                    status: {$ne: AppointmentStatus.CANCELLED}
                 }
             },
-            {
-                $lookup: {
-                    from: 'users',
-                    localField: 'bookedBy',
-                    foreignField: '_id',
-                    as: 'userDetails'
-                }
-            },
-            {
-                $unwind: {
-                    path: '$userDetails',
-                    preserveNullAndEmptyArrays: true
-                }
-            }
+            ...withParticipant('bookedBy', 'patientprofiles'),
+            {$sort: {checkupTiming: 1 as const}}
         ];
 
         const bookingDetails = await appointmentModel.aggregate(pipeline);
@@ -199,12 +203,17 @@ const getAllDoctors = async (req: Request, res: Response) => {
             }
 
             const startHour = convertTo24Hour(start, startPeriod);
-            const endHour = convertTo24Hour(end, endPeriod);
+            let endHour = convertTo24Hour(end, endPeriod);
+
+            // Overnight shifts such as "10 PM - 6 AM" end on a smaller hour than they
+            // start. Counting straight up from start to end produced no slots at all.
+            if (endHour <= startHour) {
+                endHour += 24;
+            }
 
             let slots = [];
             for (let hour = startHour; hour < endHour; hour++) {
-                let slot = `${hour}-${hour + 1}`;
-                slots.push(slot);
+                slots.push(`${hour % 24}-${(hour + 1) % 24}`);
             }
             return slots;
         }
@@ -323,7 +332,8 @@ const getAllDoctors = async (req: Request, res: Response) => {
                 });
             }
 
-            const doctorDetails = await userModel.find({role: UserRole.DOCTOR, specialization: specialization}).select('-password');
+            // specialization is stored on DoctorProfile; querying it on User matched nothing.
+            const doctorDetails = await userService.getDoctorsBySpecialization(specialization);
             if (!doctorDetails.length) {
                 return res.status(HttpStatusCode.NOT_FOUND).send({
                     status: false,

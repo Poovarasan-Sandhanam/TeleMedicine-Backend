@@ -9,6 +9,7 @@ import appointmentModel from "../models/appointments/appointmentModel";
 import {ObjectId} from "mongodb";
 import {AppointmentStatus} from "../interfaces/appointments.interface";
 import doctorProfileModel, {DEFAULT_CONSULTATION_FEE} from "../models/user/doctorProfile.model";
+import {withParticipant} from "../utilities/participantLookup";
 
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!);
@@ -72,20 +73,8 @@ const getMyBookings = async (req: Request, res: Response) => {
                     bookedBy: new ObjectId(userId),
                 },
             },
-            {
-                $lookup: {
-                    from: 'users',
-                    localField: 'doctor',
-                    foreignField: '_id',
-                    as: 'userDetails'
-                }
-            },
-            {
-                $unwind: {
-                    path: '$userDetails',
-                    preserveNullAndEmptyArrays: true
-                }
-            }
+            ...withParticipant('doctor', 'doctorprofiles'),
+            {$sort: {date: -1 as const, checkupTiming: 1 as const}}
         ]);
         return sendSuccess(res, {bookingDetails}, 'Booking Details fetched successfully', HttpStatusCode.OK);
     } catch (error: any) {
@@ -105,20 +94,8 @@ const getAllBookingUsers = async (req: Request, res: Response) => {
                     doctor: new ObjectId(userId),
                 },
             },
-            {
-                $lookup: {
-                    from: 'users',
-                    localField: 'bookedBy',
-                    foreignField: '_id',
-                    as: 'userDetails'
-                }
-            },
-            {
-                $unwind: {
-                    path: '$userDetails',
-                    preserveNullAndEmptyArrays: true
-                }
-            }
+            ...withParticipant('bookedBy', 'patientprofiles'),
+            {$sort: {date: -1 as const, checkupTiming: 1 as const}}
         ]);
         return sendSuccess(res, {bookingDetails}, 'Booking Details fetched successfully', HttpStatusCode.OK);
     } catch (error: any) {

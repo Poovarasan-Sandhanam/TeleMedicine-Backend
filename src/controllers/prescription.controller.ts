@@ -1,35 +1,46 @@
 import {Request, Response} from "express";
 import HttpStatusCode from "http-status-codes";
 import {sendError, sendSuccess} from "../utilities/responseHandler";
-import userService from "../services/user.service";
 import prescriptionModel from "../models/eprescriptions/prescription.model";
+import appointmentModel from "../models/appointments/appointmentModel";
+import {AppointmentStatus} from "../interfaces/appointments.interface";
 
-
-const addPrescription  = async (req: Request, res: Response) => {
+/**
+ * Doctor writes the medicines and treatment statement after a consultation.
+ *
+ * The doctor is taken from the token and the patient from the appointment, never
+ * from the request body. Previously both ids came from the body with no check, so
+ * any logged-in user - including a patient - could write a prescription for anyone.
+ * Writing one completes the appointment.
+ */
+const addPrescription = async (req: Request, res: Response) => {
     try {
-        const {
-            patientId,
-            doctorId,
-            patientName,
-            age,
-            symptoms,
-            diagnosis,
-            medications,
-            notes,
-            date
-        } = req.body;
+        const doctorId = (req as any).user._id;
+        const {appointmentId, patientName, age, symptoms, diagnosis, medications, notes, date} = req.body;
 
-        const existingPatient = await userService.getUserDetails({_id: patientId});
-        if (!existingPatient) {
-            return sendError(res, 'Patient not found', HttpStatusCode.NOT_FOUND);
+        if (!appointmentId) {
+            return sendError(res, 'appointmentId is required', HttpStatusCode.BAD_REQUEST);
         }
-        const existingDoctor = await userService.getUserDetails({_id: doctorId});
-        if (!existingDoctor) {
-            return sendError(res, 'Doctor not found', HttpStatusCode.NOT_FOUND);
+        if (!Array.isArray(medications) || medications.length === 0) {
+            return sendError(res, 'At least one medication is required', HttpStatusCode.BAD_REQUEST);
+        }
+
+        const appointment = await appointmentModel.findById(appointmentId);
+        if (!appointment) {
+            return sendError(res, 'Appointment not found', HttpStatusCode.NOT_FOUND);
+        }
+        if (appointment.doctor?.toString() !== doctorId.toString()) {
+            return sendError(res, 'You can only write prescriptions for your own appointments', HttpStatusCode.FORBIDDEN);
+        }
+
+        const prescribable = [AppointmentStatus.CONFIRMED, AppointmentStatus.COMPLETED];
+        if (!prescribable.includes(appointment.status)) {
+            return sendError(res, `Cannot prescribe for an appointment that is ${appointment.status}`, HttpStatusCode.BAD_REQUEST);
         }
 
         const prescriptionData = await prescriptionModel.create({
-            patientId,
+            appointmentId,
+            patientId: appointment.bookedBy,
             doctorId,
             patientName,
             age,
@@ -37,31 +48,31 @@ const addPrescription  = async (req: Request, res: Response) => {
             diagnosis,
             medications,
             notes,
-            date
-        })
+            date: date ? new Date(date) : new Date()
+        });
+
+        if (appointment.status !== AppointmentStatus.COMPLETED) {
+            appointment.status = AppointmentStatus.COMPLETED;
+            appointment.expiresAt = undefined;
+            await appointment.save();
+        }
 
         return sendSuccess(res, prescriptionData, 'Prescription added successfully', HttpStatusCode.CREATED);
 
     } catch (error: any) {
-        return res.status(HttpStatusCode.BAD_REQUEST).send({
-            status: false,
-            message: error.message,
-        });
+        return sendError(res, error.message, HttpStatusCode.BAD_REQUEST);
     }
 };
 
-
+/** The logged-in patient's prescriptions, newest first. */
 const getPrescriptionDetails = async (req: Request, res: Response) => {
     try {
         const userId = (req as any).user._id;
-        const prescriptionDetails = await prescriptionModel.find({patientId: userId});
+        const prescriptionDetails = await prescriptionModel.find({patientId: userId}).sort({date: -1});
         return sendSuccess(res, prescriptionDetails, 'Prescription Details fetched successfully', HttpStatusCode.OK);
 
     } catch (error: any) {
-        return res.status(HttpStatusCode.BAD_REQUEST).send({
-            status: false,
-            message: error.message,
-        });
+        return sendError(res, error.message, HttpStatusCode.BAD_REQUEST);
     }
 };
 

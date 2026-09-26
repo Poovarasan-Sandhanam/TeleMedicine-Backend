@@ -2,6 +2,10 @@ import { Schema, model } from 'mongoose'
 import { IPrescriptions } from "../../interfaces/prescriptions.interface";
 
 const prescriptionSchema = new Schema({
+    appointmentId: {
+        type: Schema.Types.ObjectId,
+        ref: 'Appointments',
+    },
     patientId: {
         type: Schema.Types.ObjectId,
         required: true,
