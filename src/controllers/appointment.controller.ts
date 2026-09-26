@@ -9,11 +9,36 @@ import CustomError from "../utilities/customError";
 import moment from "moment";
 import {ObjectId} from "mongodb";
 import { UserRole, DoctorSpecialization } from "../interfaces/user.interface";
+import { AppointmentStatus, BLOCKING_STATUSES } from "../interfaces/appointments.interface";
+
+/** How long a slot stays reserved while the patient completes payment. */
+const HOLD_MINUTES = 15;
+
+/**
+ * Matches appointments that currently occupy a slot: anything confirmed or completed,
+ * plus holds still inside their payment window. Expired holds are excluded, so an
+ * abandoned checkout releases the slot without any background job having to run.
+ */
+const occupiesSlot = () => ({
+    $or: [
+        {status: {$in: BLOCKING_STATUSES}},
+        {status: AppointmentStatus.HELD, expiresAt: {$gt: new Date()}}
+    ]
+});
 
 const bookAppointment = async (req: Request, res: Response) => {
     try {
-        const {healthIssues, checkupTiming, doctor, notes, date} = req.body;
+        // The mobile client sends {doctorId, date, time, healthIssue, notes}. The older
+        // {doctor, checkupTiming, healthIssues} spellings are still read so either works.
+        const {notes, date} = req.body;
+        const doctor = req.body.doctorId ?? req.body.doctor;
+        const checkupTiming = req.body.time ?? req.body.checkupTiming;
+        const healthIssue = req.body.healthIssue ?? req.body.healthIssues;
         const userId = (req as any).user._id
+
+        if (!doctor || !checkupTiming || !date) {
+            throw new CustomError('doctorId, date and time are required', HttpStatusCode.BAD_REQUEST);
+        }
 
         const userDetails = await userModel.findOne({_id: userId});
 
@@ -32,16 +57,20 @@ const bookAppointment = async (req: Request, res: Response) => {
             throw new CustomError('Invalid doctor selected', HttpStatusCode.BAD_REQUEST);
         }
 
-        const appointmentData = await appointmentModel.findOne({doctor, checkupTiming, date});
+        const appointmentData = await appointmentModel.findOne({
+            doctor, checkupTiming, date, ...occupiesSlot()
+        });
         if (appointmentData) {
             throw new CustomError('This appointment is already booked', HttpStatusCode.BAD_REQUEST);
         }
-        
+
         const appointmentDetails = await appointmentModel.create({
-            healthIssues, checkupTiming, doctor, notes, bookedBy: userId, date
+            healthIssue, checkupTiming, doctor, notes, bookedBy: userId, date,
+            status: AppointmentStatus.HELD,
+            expiresAt: moment().add(HOLD_MINUTES, 'minutes').toDate()
         })
 
-        return sendSuccess(res, appointmentDetails, 'Appointment booked successfully', HttpStatusCode.CREATED);
+        return sendSuccess(res, appointmentDetails, `Slot held for ${HOLD_MINUTES} minutes - complete payment to confirm`, HttpStatusCode.CREATED);
 
     } catch (error: any) {
         return res.status(HttpStatusCode.BAD_REQUEST).send({
@@ -51,18 +80,47 @@ const bookAppointment = async (req: Request, res: Response) => {
     }
 }
 
-const bookAppointmentStatus = async (req: Request, res: Response) => {
+/**
+ * Cancel an appointment. Either participant may cancel - the patient who booked it or
+ * the doctor it was booked with - and only before the consultation has taken place.
+ */
+const cancelAppointment = async (req: Request, res: Response) => {
     try {
-        const {userId, status} = req.body;
+        const {appointmentId} = req.body;
+        const userId = (req as any).user._id;
 
-        const appointmentDetails = await appointmentModel.updateOne({
-            bookedBy: userId
-        }, {$set: {status}})
+        if (!appointmentId) {
+            throw new CustomError('appointmentId is required', HttpStatusCode.BAD_REQUEST);
+        }
 
-        return sendSuccess(res, appointmentDetails, 'Appointment booked status changed successfully', HttpStatusCode.CREATED);
+        const appointment = await appointmentModel.findById(appointmentId);
+        if (!appointment) {
+            throw new CustomError('Appointment not found', HttpStatusCode.NOT_FOUND);
+        }
+
+        const isParticipant = appointment.bookedBy?.toString() === userId.toString()
+            || appointment.doctor?.toString() === userId.toString();
+        if (!isParticipant) {
+            throw new CustomError('You are not a participant in this appointment', HttpStatusCode.FORBIDDEN);
+        }
+
+        if (appointment.status === AppointmentStatus.COMPLETED) {
+            throw new CustomError('A completed consultation cannot be cancelled', HttpStatusCode.BAD_REQUEST);
+        }
+        if (appointment.status === AppointmentStatus.CANCELLED) {
+            throw new CustomError('This appointment is already cancelled', HttpStatusCode.BAD_REQUEST);
+        }
+
+        appointment.status = AppointmentStatus.CANCELLED;
+        appointment.cancelledBy = userId;
+        appointment.cancelledAt = new Date();
+        appointment.expiresAt = undefined;
+        await appointment.save();
+
+        return sendSuccess(res, appointment, 'Appointment cancelled successfully', HttpStatusCode.OK);
 
     } catch (error: any) {
-        return res.status(HttpStatusCode.BAD_REQUEST).send({
+        return res.status(error.statusCode || HttpStatusCode.BAD_REQUEST).send({
             status: false,
             message: error.message,
         })
@@ -158,13 +216,8 @@ const getAllDoctors = async (req: Request, res: Response) => {
             // Filter and format the slots
             const formattedSlots = slots.map((slot: any) => {
                 let isBooked = false;
-                let newDate;
                 if (bookedSlots?.length) {
                     isBooked = bookedSlots.includes(slot);
-                    newDate = appointmentDetails.find((app: any) =>
-                        app.checkupTiming = slot
-                    ).date;
-
                 }
                 return {
                     slotTiming: slot,
@@ -270,7 +323,7 @@ const getAllDoctors = async (req: Request, res: Response) => {
                 });
             }
 
-            const doctorDetails = await userModel.find({role: UserRole.DOCTOR, specialization: specialization});
+            const doctorDetails = await userModel.find({role: UserRole.DOCTOR, specialization: specialization}).select('-password');
             if (!doctorDetails.length) {
                 return res.status(HttpStatusCode.NOT_FOUND).send({
                     status: false,
@@ -284,7 +337,7 @@ const getAllDoctors = async (req: Request, res: Response) => {
         // Find by doctor ID
         if (id) {
 
-            const doctorDetails = await doctorProfileModel.findOne({userId: id}, {'consultationTiming': 1});
+            const doctorDetails = await doctorProfileModel.findOne({userId: id}).select('consultationTiming');
             if (!doctorDetails) {
 
                 return res.status(HttpStatusCode.NOT_FOUND).send({
@@ -293,7 +346,7 @@ const getAllDoctors = async (req: Request, res: Response) => {
                 });
             }
             const slotsRes = generateSlotsFromString(doctorDetails.consultationTiming);
-            const appointmentDetails = await appointmentModel.find({doctor: id, date: selectedDate});
+            const appointmentDetails = await appointmentModel.find({doctor: id, date: selectedDate, ...occupiesSlot()});
 
             const slots = formatSlots(slotsRes, appointmentDetails);
             return sendSuccess(res, {slots}, 'Doctor Details Fetched Successfully', HttpStatusCode.OK);
@@ -302,6 +355,7 @@ const getAllDoctors = async (req: Request, res: Response) => {
         // Fetch all doctors
         const doctors = await userModel.aggregate([
             {$match: {role: UserRole.DOCTOR}},
+            {$project: {password: 0, __v: 0}},
             {
                 $lookup: {
                     from: 'doctorprofiles',
@@ -335,4 +389,4 @@ const getAllDoctors = async (req: Request, res: Response) => {
 };
 
 
-export default {bookAppointment, getAllDoctors, getAllAppointments, bookAppointmentStatus}
+export default {bookAppointment, getAllDoctors, getAllAppointments, cancelAppointment}

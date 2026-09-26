@@ -7,6 +7,7 @@ import moment from "moment";
 import userBookingModel from "../models/bookings/booking.model";
 import appointmentModel from "../models/appointments/appointmentModel";
 import {ObjectId} from "mongodb";
+import {AppointmentStatus} from "../interfaces/appointments.interface";
 
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!);
@@ -166,9 +167,11 @@ const getDetailsFromWebhook = async (req: any, res: Response) => {
                     isBooked: true
                 });
 
+                // Payment cleared: promote the hold to a confirmed booking and drop the
+                // expiry so the slot is no longer reclaimable.
                 await appointmentModel.findOneAndUpdate(
                     {_id: new ObjectId(appointmentId)},
-                    {$set: {status: "Success"}},
+                    {$set: {status: AppointmentStatus.CONFIRMED}, $unset: {expiresAt: 1}},
                 );
 
                 console.log(`PaymentIntent for ${paymentIntent.amount} was successful!`);
