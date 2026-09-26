@@ -3,8 +3,10 @@ import * as dotenv from "dotenv"
 dotenv.config({ path: path.join(__dirname, "../../.env") })
 
 const SERVER = {
-  hostName: process.env.SERVER_HOSTNAME,
-  port: process.env.SERVER_PORT
+  hostName: process.env.SERVER_HOSTNAME || "0.0.0.0",
+  // Never leave this undefined: app.listen(undefined) binds an arbitrary free
+  // port, which makes a container's health check fail with no obvious cause.
+  port: Number(process.env.SERVER_PORT) || 3000
 }
 const API = {
   prefix: process.env.API_PREFIX || ""

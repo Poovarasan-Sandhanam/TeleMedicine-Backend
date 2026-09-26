@@ -72,6 +72,21 @@ app.get("/", (req: Request, res: Response) => {
   });
 });
 
+/**
+ * Liveness/readiness probe for the container platform. Reports 503 while Mongo is
+ * not connected so a broken instance is replaced rather than served traffic.
+ * mongoose.connection.readyState: 1 = connected, 2 = connecting.
+ */
+app.get("/health", (req: Request, res: Response) => {
+  const dbState = mongoose.connection.readyState;
+  const healthy = dbState === 1;
+  res.status(healthy ? 200 : 503).json({
+    status: healthy ? "ok" : "degraded",
+    database: dbState === 1 ? "connected" : dbState === 2 ? "connecting" : "disconnected",
+    uptime: Math.round(process.uptime()),
+  });
+});
+
 /* routes */
 app.use(prefix, routes);
 app.use(handleError);
