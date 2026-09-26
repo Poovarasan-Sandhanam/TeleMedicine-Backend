@@ -94,3 +94,6 @@ Thumbs.db
 .Trashes
 ehthumbs.db
 Thumbs.db
+
+# Compromised - was committed to public history. Use JWT_SECRET instead.
+private.key
