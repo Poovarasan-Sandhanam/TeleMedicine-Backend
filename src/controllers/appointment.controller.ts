@@ -4,13 +4,14 @@ import {sendSuccess} from "../utilities/responseHandler";
 import appointmentModel from "../models/appointments/appointmentModel";
 import userModel from "../models/user/user.model";
 import doctorProfileModel from "../models/user/doctorProfile.model";
-import patientProfileModel from "../models/user/patientProfile.model";
 import CustomError from "../utilities/customError";
 import moment from "moment";
 import {ObjectId} from "mongodb";
-import { UserRole, DoctorSpecialization } from "../interfaces/user.interface";
-import { AppointmentStatus, BLOCKING_STATUSES } from "../interfaces/appointments.interface";
+import { UserRole } from "../interfaces/user.interface";
+import { AppointmentStatus } from "../interfaces/appointments.interface";
 import { withParticipant } from "../utilities/participantLookup";
+import { generateSlots, occupiesSlot } from "../utilities/slots";
+import { HEALTH_ISSUE_SPECIALTY } from "../ai/specialtyKeywords";
 import userService from "../services/user.service";
 
 /** How long a slot stays reserved while the patient completes payment. */
@@ -23,17 +24,6 @@ const HOLD_MINUTES = 15;
  */
 const isPaymentRequired = () => process.env.PAYMENT_REQUIRED === 'true';
 
-/**
- * Matches appointments that currently occupy a slot: anything confirmed or completed,
- * plus holds still inside their payment window. Expired holds are excluded, so an
- * abandoned checkout releases the slot without any background job having to run.
- */
-const occupiesSlot = () => ({
-    $or: [
-        {status: {$in: BLOCKING_STATUSES}},
-        {status: AppointmentStatus.HELD, expiresAt: {$gt: new Date()}}
-    ]
-});
 
 const bookAppointment = async (req: Request, res: Response) => {
     try {
@@ -191,32 +181,6 @@ const getAllAppointments = async (req: Request, res: Response) => {
 
 const getAllDoctors = async (req: Request, res: Response) => {
     try {
-        // Generate Slots Based on String Timing
-        function generateSlotsFromString(timingStr: any) {
-            const [start, end] = timingStr.match(/\d+/g).map(Number);
-            const [startPeriod, endPeriod] = timingStr.match(/(AM|PM)/g);
-
-            function convertTo24Hour(hour: any, period: any) {
-                if (period === 'PM' && hour !== 12) return hour + 12;
-                if (period === 'AM' && hour === 12) return 0;
-                return hour;
-            }
-
-            const startHour = convertTo24Hour(start, startPeriod);
-            let endHour = convertTo24Hour(end, endPeriod);
-
-            // Overnight shifts such as "10 PM - 6 AM" end on a smaller hour than they
-            // start. Counting straight up from start to end produced no slots at all.
-            if (endHour <= startHour) {
-                endHour += 24;
-            }
-
-            let slots = [];
-            for (let hour = startHour; hour < endHour; hour++) {
-                slots.push(`${hour % 24}-${(hour + 1) % 24}`);
-            }
-            return slots;
-        }
 
         function formatSlots(slots: any, appointmentDetails: any) {
             // Extract booked times from appointment details
@@ -240,91 +204,12 @@ const getAllDoctors = async (req: Request, res: Response) => {
         }
 
 
-        const healthIssues: Record<string, string> = {
-            // General Practitioner (GP)
-            'Common illnesses': 'General Practitioner (GP)',
-            'Minor injuries': 'General Practitioner (GP)',
-            'Routine check-ups': 'General Practitioner (GP)',
-            'Vaccinations': 'General Practitioner (GP)',
-            'Preventive care': 'General Practitioner (GP)',
-
-            // Cardiologist
-            'Heart pain': 'Cardiologist',
-            'Hypertension': 'Cardiologist',
-
-            // Pediatrician
-            'Growth disorders': 'Pediatrician',
-            'Infections': 'Pediatrician',
-            'Childhood illnesses': 'Pediatrician',
-
-            // Orthopedic Surgeon
-            'Fractures': 'Orthopedic Surgeon',
-            'Arthritis': 'Orthopedic Surgeon',
-            'Sports injuries': 'Orthopedic Surgeon',
-            'Spinal deformities': 'Orthopedic Surgeon',
-
-            // Gynecologist
-            'Menstrual issues': 'Gynecologist',
-            'Pelvic pain': 'Gynecologist',
-            'Ovarian cysts': 'Gynecologist',
-
-            // Obstetrician (OB)
-            'Prenatal care': 'Obstetrician (OB)',
-            'Pregnancy': 'Obstetrician (OB)',
-            'Childbirth': 'Obstetrician (OB)',
-            'Postpartum care': 'Obstetrician (OB)',
-
-            // Dermatologist
-            'Skin Problem': 'Dermatologist',
-            'Hair Problem': 'Dermatologist',
-            'Nail Problem': 'Dermatologist',
-
-            // Endocrinologist
-            'Diabetes': 'Endocrinologist',
-            'Thyroid disorders': 'Endocrinologist',
-            'Adrenal gland issues': 'Endocrinologist',
-
-            // Neurologist
-            'Brain pain': 'Neurologist',
-            'Spinal cord pain': 'Neurologist',
-            'Nerves pain': 'Neurologist',
-
-            // Psychiatrist
-            'Depression': 'Psychiatrist',
-            'Anxiety': 'Psychiatrist',
-            'Schizophrenia': 'Psychiatrist',
-            'Bipolar disorder': 'Psychiatrist',
-
-            // Gastroenterologist
-            'IBS': 'Gastroenterologist',
-            'Ulcers': 'Gastroenterologist',
-            'Crohn’s disease': 'Gastroenterologist',
-            'Liver disorders': 'Gastroenterologist',
-
-            // Pulmonologist
-            'Asthma': 'Pulmonologist',
-            'COPD': 'Pulmonologist',
-            'Pneumonia': 'Pulmonologist',
-
-            // Oncologist
-            'Breast cancer': 'Oncologist',
-            'Lung cancer': 'Oncologist',
-            'Leukemia': 'Oncologist',
-            'Lymphoma': 'Oncologist',
-
-            // Ophthalmologist
-            'Eye disorders': 'Ophthalmologist',
-
-            // Urologist
-            'Kidney stones': 'Urologist',
-            'Prostate issues': 'Urologist',
-        };
 
         const {issue, id, selectedDate} = req.query;
 
         // Find by health issue
         if (issue) {
-            const specialization = healthIssues[issue as string];
+            const specialization = HEALTH_ISSUE_SPECIALTY[issue as string];
             if (!specialization) {
                 return res.status(HttpStatusCode.NOT_FOUND).send({
                     status: false,
@@ -355,7 +240,7 @@ const getAllDoctors = async (req: Request, res: Response) => {
                     message: 'Doctor not found.',
                 });
             }
-            const slotsRes = generateSlotsFromString(doctorDetails.consultationTiming);
+            const slotsRes = generateSlots(doctorDetails.consultationTiming);
             const appointmentDetails = await appointmentModel.find({doctor: id, date: selectedDate, ...occupiesSlot()});
 
             const slots = formatSlots(slotsRes, appointmentDetails);
