@@ -68,7 +68,19 @@ const addPrescription = async (req: Request, res: Response) => {
 const getPrescriptionDetails = async (req: Request, res: Response) => {
     try {
         const userId = (req as any).user._id;
-        const prescriptionDetails = await prescriptionModel.find({patientId: userId}).sort({date: -1});
+        // Include the prescribing doctor's name so the app and the PDF can show it;
+        // the record itself only stores the id.
+        const records = await prescriptionModel
+            .find({patientId: userId})
+            .sort({date: -1})
+            .populate('doctorId', 'fullName')
+            .lean();
+        const prescriptionDetails = records.map((p: any) => ({
+            ...p,
+            id: String(p._id),
+            doctorId: p.doctorId?._id ? String(p.doctorId._id) : p.doctorId,
+            doctorName: p.doctorId?.fullName ?? null,
+        }));
         return sendSuccess(res, prescriptionDetails, 'Prescription Details fetched successfully', HttpStatusCode.OK);
 
     } catch (error: any) {
