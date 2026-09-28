@@ -46,8 +46,9 @@ userSchema.pre('save', function(next) {
     next();
 });
 
-// Index for better query performance
-userSchema.index({ email: 1 });
+// Index for better query performance.
+// Note: `email` already has a unique index from its field definition, so
+// re-declaring it here produced a duplicate-index warning on every startup.
 userSchema.index({ role: 1 });
 userSchema.index({ isDoctor: 1 });
 

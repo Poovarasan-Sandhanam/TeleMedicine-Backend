@@ -7,7 +7,9 @@ const router = Router();
 
 // Patient-only routes
 router.post('/booking', auth, requirePatientLegacy, appointmentController.bookAppointment);
-router.put('/booking-status', auth, requirePatientLegacy, appointmentController.bookAppointmentStatus);
+
+// Either participant may cancel, so no role gate here - ownership is checked in the controller.
+router.put('/cancel', auth, appointmentController.cancelAppointment);
 
 // Public routes (authenticated users can access)
 router.get('/get-all-doctors', auth, appointmentController.getAllDoctors);

@@ -94,3 +94,26 @@ Thumbs.db
 .Trashes
 ehthumbs.db
 Thumbs.db
+
+# Compromised - was committed to public history. Use JWT_SECRET instead.
+private.key
+
+# ---------------------------------------------------------------
+# Secrets - never commit these. The repo is public.
+# NOTE: .gitignore only affects files not already committed.
+# private.key was committed before this rule existed and remains
+# in git history until it is purged; it must also be rotated.
+# ---------------------------------------------------------------
+.env
+.env.*
+!.env.example
+private.key
+*.key
+*.pem
+*.p12
+*.pfx
+*.jks
+*.keystore
+!android/app/debug.keystore
+credentials.json
+service-account*.json

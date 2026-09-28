@@ -81,7 +81,7 @@ const login = async (req: Request, res: Response) => {
             })
         }
 
-        const token = generateToken(user._id)
+        const token = generateToken(user)
         
         // Return both new and legacy fields for backward compatibility
         const userDetails = {

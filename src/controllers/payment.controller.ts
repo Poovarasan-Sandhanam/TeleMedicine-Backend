@@ -7,26 +7,46 @@ import moment from "moment";
 import userBookingModel from "../models/bookings/booking.model";
 import appointmentModel from "../models/appointments/appointmentModel";
 import {ObjectId} from "mongodb";
+import {AppointmentStatus} from "../interfaces/appointments.interface";
+import doctorProfileModel, {DEFAULT_CONSULTATION_FEE} from "../models/user/doctorProfile.model";
+import {withParticipant} from "../utilities/participantLookup";
 
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!);
 
 const createPaymentIntent = async (req: Request, res: Response) => {
     try {
-        const userId = (req as any).user._id.toString(); // Convert userId to a string
+        const userId = (req as any).user._id.toString();
         const {appointmentId} = req.body;
 
-        if (!userId) {
-            throw new CustomError('User Id is required', HttpStatusCode.NOT_FOUND);
-        }
         if (!appointmentId) {
-            throw new CustomError('Appointment Id is required', HttpStatusCode.NOT_FOUND);
+            throw new CustomError('Appointment Id is required', HttpStatusCode.BAD_REQUEST);
         }
 
+        const appointment = await appointmentModel.findById(appointmentId);
+        if (!appointment) {
+            throw new CustomError('Appointment not found', HttpStatusCode.NOT_FOUND);
+        }
+
+        // Only the patient who holds this slot may pay for it.
+        if (appointment.bookedBy?.toString() !== userId) {
+            throw new CustomError('This appointment does not belong to you', HttpStatusCode.FORBIDDEN);
+        }
+        if (appointment.status !== AppointmentStatus.HELD) {
+            throw new CustomError(`This appointment is ${appointment.status} and cannot be paid for`, HttpStatusCode.BAD_REQUEST);
+        }
+        if (appointment.expiresAt && appointment.expiresAt.getTime() <= Date.now()) {
+            throw new CustomError('This hold has expired - please book the slot again', HttpStatusCode.BAD_REQUEST);
+        }
+
+        // Price comes from the doctor's profile, not a hardcoded constant.
+        const doctorProfile = await doctorProfileModel.findOne({userId: appointment.doctor});
+        const amount = doctorProfile?.consultationFee ?? DEFAULT_CONSULTATION_FEE;
+
         const paymentIntent = await stripe.paymentIntents.create({
-            amount: 100,
+            amount,
             currency: 'usd',
-            description: '',
+            description: `Consultation ${appointmentId}`,
             automatic_payment_methods: {enabled: true},
             metadata: {
                 appointmentId: appointmentId.toString(),
@@ -35,9 +55,9 @@ const createPaymentIntent = async (req: Request, res: Response) => {
         });
 
         const paymentClientSecret = paymentIntent.client_secret;
-        return sendSuccess(res, {paymentClientSecret}, 'Appointment booked successfully', HttpStatusCode.OK);
+        return sendSuccess(res, {paymentClientSecret, amount, currency: 'usd'}, 'Payment intent created', HttpStatusCode.OK);
     } catch (error: any) {
-        return res.status(HttpStatusCode.BAD_REQUEST).send({
+        return res.status(error.statusCode || HttpStatusCode.BAD_REQUEST).send({
             status: false,
             message: error.message,
         });
@@ -53,20 +73,8 @@ const getMyBookings = async (req: Request, res: Response) => {
                     bookedBy: new ObjectId(userId),
                 },
             },
-            {
-                $lookup: {
-                    from: 'users',
-                    localField: 'doctor',
-                    foreignField: '_id',
-                    as: 'userDetails'
-                }
-            },
-            {
-                $unwind: {
-                    path: '$userDetails',
-                    preserveNullAndEmptyArrays: true
-                }
-            }
+            ...withParticipant('doctor', 'doctorprofiles'),
+            {$sort: {date: -1 as const, checkupTiming: 1 as const}}
         ]);
         return sendSuccess(res, {bookingDetails}, 'Booking Details fetched successfully', HttpStatusCode.OK);
     } catch (error: any) {
@@ -86,20 +94,8 @@ const getAllBookingUsers = async (req: Request, res: Response) => {
                     doctor: new ObjectId(userId),
                 },
             },
-            {
-                $lookup: {
-                    from: 'users',
-                    localField: 'bookedBy',
-                    foreignField: '_id',
-                    as: 'userDetails'
-                }
-            },
-            {
-                $unwind: {
-                    path: '$userDetails',
-                    preserveNullAndEmptyArrays: true
-                }
-            }
+            ...withParticipant('bookedBy', 'patientprofiles'),
+            {$sort: {date: -1 as const, checkupTiming: 1 as const}}
         ]);
         return sendSuccess(res, {bookingDetails}, 'Booking Details fetched successfully', HttpStatusCode.OK);
     } catch (error: any) {
@@ -117,41 +113,45 @@ const getAllBookingUsers = async (req: Request, res: Response) => {
  */
 
 const getDetailsFromWebhook = async (req: any, res: Response) => {
+    const signature: any = req.headers['stripe-signature']?.toString();
+    const rawBody: any = req.rawBody;
+    const endpointSecret = process.env.STRIPE_WEBHOOK_SECRET;
+
+    // Unverified callers must never reach the booking logic. Previously a missing
+    // STRIPE_WEBHOOK_SECRET skipped verification entirely and the handler fell back to
+    // two hardcoded ids, so anyone could POST here and confirm someone else's booking.
+    if (!endpointSecret) {
+        console.error('STRIPE_WEBHOOK_SECRET is not configured - rejecting webhook');
+        return res.status(HttpStatusCode.SERVICE_UNAVAILABLE).send({
+            status: false,
+            message: 'Webhook processing is not configured',
+        });
+    }
+
+    let event: Stripe.Event;
     try {
-        const signature: any = req.headers['stripe-signature']?.toString();
-        const rawBody: any = req.rawBody;
-        let event;
-        const endpointSecret = process.env.STRIPE_WEBHOOK_SECRET!;
+        event = stripe.webhooks.constructEvent(rawBody, signature, endpointSecret);
+    } catch (err: any) {
+        console.error('Webhook signature verification failed.', err.message);
+        return res.status(HttpStatusCode.BAD_REQUEST).send({
+            status: false,
+            message: 'Webhook signature verification failed',
+        });
+    }
 
-        if (endpointSecret) {
-            try {
-                event = stripe.webhooks.constructEvent(
-                    rawBody,
-                    signature,
-                    endpointSecret
-                );
-            } catch (err: any) {
-                console.log(`Webhook signature verification failed.`, err.message);
-                throw new CustomError('Webhook signature verification failed', HttpStatusCode.BAD_REQUEST);
-            }
-        }
-        const paymentIntent: any = event?.data.object;
-        const userId = paymentIntent?.metadata?.userId ?? '676597637f31bfa789cc12c0'
-        const appointmentId = paymentIntent?.metadata?.appointmentId ?? '67782a0a24b1fe15d2f84749'
+    try {
+        const paymentIntent: any = event.data.object;
+        const userId = paymentIntent?.metadata?.userId;
+        const appointmentId = paymentIntent?.metadata?.appointmentId;
 
-        if (!userId) {
-            return res.status(HttpStatusCode.BAD_REQUEST).send({
-                status: false,
-                message: 'Patient Id is required',
-            });
+        // Events we do not act on are acknowledged so Stripe stops retrying them.
+        const needsBooking = event.type === 'payment_intent.succeeded'
+            || event.type === 'payment_intent.payment_failed';
+        if (needsBooking && (!userId || !appointmentId)) {
+            console.error(`Webhook ${event.type} missing metadata`, {userId, appointmentId});
+            return res.status(HttpStatusCode.OK).send({status: true, message: 'Ignored: missing metadata'});
         }
-        if (!appointmentId) {
-            return res.status(HttpStatusCode.BAD_REQUEST).send({
-                status: false,
-                message: 'Appointment Id is required',
-            });
-        }
-        switch (event?.type) {
+        switch (event.type) {
 
             case 'payment_intent.succeeded':
 
@@ -166,9 +166,11 @@ const getDetailsFromWebhook = async (req: any, res: Response) => {
                     isBooked: true
                 });
 
+                // Payment cleared: promote the hold to a confirmed booking and drop the
+                // expiry so the slot is no longer reclaimable.
                 await appointmentModel.findOneAndUpdate(
                     {_id: new ObjectId(appointmentId)},
-                    {$set: {status: "Success"}},
+                    {$set: {status: AppointmentStatus.CONFIRMED}, $unset: {expiresAt: 1}},
                 );
 
                 console.log(`PaymentIntent for ${paymentIntent.amount} was successful!`);
@@ -195,10 +197,19 @@ const getDetailsFromWebhook = async (req: any, res: Response) => {
                 break
             }
             default:
-                console.log(`Unhandled event type ${event?.type}.`);
+                console.log(`Unhandled event type ${event.type}.`);
         }
+
+        // Stripe needs a 2xx or it retries the event with backoff.
+        return res.status(HttpStatusCode.OK).send({status: true, received: true});
     } catch (error: any) {
-        throw new CustomError(error.statusCode, error.message)
+        // Log and return 500 so Stripe retries, rather than throwing out of an async
+        // handler where Express cannot see it and the request hangs.
+        console.error('Webhook handling failed', error);
+        return res.status(HttpStatusCode.INTERNAL_SERVER_ERROR).send({
+            status: false,
+            message: 'Webhook handling failed',
+        });
     }
 }
 

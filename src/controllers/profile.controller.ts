@@ -5,11 +5,12 @@ import userService from "../services/user.service";
 import doctorProfileModel from "../models/user/doctorProfile.model";
 import patientProfileModel from "../models/user/patientProfile.model";
 import { uploadToS3 } from "../utilities/s3Uploader";
-import { UserRole, DoctorSpecialization } from "../interfaces/user.interface";
+import { UserRole } from "../interfaces/user.interface";
 import { FilterQuery } from "mongoose";
 import { IDoctorProfile } from "../interfaces/doctorProfile.interface";
 import { IPatientProfile } from "../interfaces/patientProfile.interface";
-import UserModel from "../models/user/user.model"; // make sure path is correct
+import { resolveSpecialization } from "./doctor.controller";
+import { listBookableDoctors } from "../services/doctorDirectory";
 
 /**
  * Update profile for doctor or patient
@@ -26,10 +27,12 @@ const updateProfile = async (req: Request, res: Response) => {
 
     if (isDoctor) {
       const {
-        name, age, contactNumber, address, specialization,
+        name, age, contactNumber, address,
         experience, consultationTiming, licenseNumber,
         education, certifications, languages, gender
       } = req.body;
+      // The app has sent this as `specialized`, holding a tile id; accept both.
+      const specialization = resolveSpecialization(req.body.specialization ?? req.body.specialized);
 
       // Validate required fields
       for (const [key, value] of Object.entries({
@@ -38,7 +41,7 @@ const updateProfile = async (req: Request, res: Response) => {
         if (!value) return sendError(res, `Field ${key} is required for doctors`, HttpStatusCode.BAD_REQUEST);
       }
 
-      if (!Object.values(DoctorSpecialization).includes(specialization)) {
+      if (!specialization) {
         return sendError(res, "Invalid specialization", HttpStatusCode.BAD_REQUEST);
       }
 
@@ -113,14 +116,15 @@ const getProfile = async (req: Request, res: Response) => {
     if (!userData) return sendError(res, "User not found", HttpStatusCode.NOT_FOUND);
 
     const isDoctor = userData.role === UserRole.DOCTOR || userData.isDoctor;
+    const { password, ...safeUser } = userData.toObject();
     let profileData: any;
 
     if (isDoctor) {
       const profile = await doctorProfileModel.findOne({ userId } as FilterQuery<IDoctorProfile>);
-      profileData = profile ? { ...userData.toObject(), ...profile.toObject() } : userData.toObject();
+      profileData = profile ? { ...safeUser, ...profile.toObject() } : safeUser;
     } else {
       const profile = await patientProfileModel.findOne({ userId } as FilterQuery<IPatientProfile>);
-      profileData = profile ? { ...userData.toObject(), ...profile.toObject() } : userData.toObject();
+      profileData = profile ? { ...safeUser, ...profile.toObject() } : safeUser;
     }
 
     return sendSuccess(res, profileData, "Profile fetched successfully");
@@ -134,46 +138,10 @@ const getProfile = async (req: Request, res: Response) => {
  */
 const getCompletedDoctorProfiles = async (req: Request, res: Response) => {
   try {
-    // Define required fields for a "completed" doctor profile
-    const requiredFields = [
-      "name",
-      "age",
-      "contactNumber",
-      "address",
-      "specialization",
-      "experience",
-      "consultationTiming",
-      "gender",
-      "licenseNumber"
-    ];
-
-    // Query doctors with all required fields filled
-    const doctors = await doctorProfileModel.find({
-      $and: requiredFields.map(field => ({
-        [field]: { $exists: true, $nin: [null, ""] }
-      }))
-    });
-
-    if (!doctors.length) {
+    const result = await listBookableDoctors();
+    if (!result.length) {
       return sendError(res, "No completed doctor profiles found", HttpStatusCode.NOT_FOUND);
     }
-
-    // Ensure they are valid doctor users
-    const doctorUserIds = doctors.map(d => d.userId);
-    const users = await UserModel.find({
-      _id: { $in: doctorUserIds },
-      role: UserRole.DOCTOR
-    });
-
-    // Merge user + profile data
-    const result = doctors.map(doc => {
-      const user = users.find((u: any) => u._id.toString() === doc.userId.toString());
-      return {
-        ...user?.toObject(),
-        ...doc.toObject()
-      };
-    });
-
     return sendSuccess(res, result, "Completed doctor profiles fetched successfully");
   } catch (error: any) {
     return sendError(res, error.message, HttpStatusCode.BAD_REQUEST);
